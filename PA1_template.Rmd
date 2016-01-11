@@ -5,21 +5,145 @@ output:
     keep_md: true
 ---
 
-
 ## Loading and preprocessing the data
 
-
+```{r}
+# Unzip and read the activity input file and
+# transform the 'date' column into a Date type field.
+unzip("activity.zip")
+data <- read.csv("activity.csv", colClasses = c("integer", "Date", "integer"))
+```
 
 ## What is mean total number of steps taken per day?
 
+```{r}
+daily_sum <- aggregate(data$steps, list(data$date), FUN=sum)
+daily_sum <- setNames(daily_sum, c(names(data[2]),names(data[1])))
+plot(daily_sum$date, daily_sum$steps, type="h", main="Total steps by day (Histogram)",
+     xlab="Date", ylab="Count", col="blue", lwd=5)
+```
+
+Mean of the total number of steps taken per day
+
+```{r}
+setNames(aggregate(data$steps, list(data$date),
+                   FUN=mean, na.action=na.omit),
+         c(names(data[2]),"meanDailySteps"))
+```
+Observation: A few days have all 'NA' values for steps, that results in 'NA' mean for those days. There is no optimization done to remove NAs as it's not required as per instructions for this step.
+
+
+Median of the total number of steps taken per day
+
+```{r}
+setNames(aggregate(data$steps, list(data$date), FUN=median, na.rm=TRUE),
+         c(names(data[2]),"medianDailySteps"))
+```
+
+Observation: Median is all 0s or NAs.  
+It's not an error. Interestingly (but not surprisingly), there are a lot of 0 values for many of the intervals of each day which results in 0 being at the 50th percentile of the dataset for each day, which is the median for the given day.  
+There is no optimization done to remove NAs as it's not required as per instructions for this step. That resulted in some 'NA's in median.
 
 
 ## What is the average daily activity pattern?
 
+```{r}
+mean_steps_by_time <- aggregate(data$steps, list(data$interval), FUN=mean, na.rm=TRUE)
+mean_steps_by_time <- setNames(mean_steps_by_time, c(names(data[3]), names(data[1])))
+
+plot(mean_steps_by_time, type="l", xlab="Interval", ylab="Average steps", col="blue",
+     main="Average daily average of steps")
+
+# Highlight the time of day with maximum daily average number of steps.
+max_loc <- which(mean_steps_by_time$steps == max(mean_steps_by_time$steps))
+max_interval <- mean_steps_by_time[max_loc,]$interval
+abline(v = max_interval, col = "red")
+```
+
+Therefore, the 5-minute interval on average across all the days in the dataset, that contains the maximum number of steps is the one that corresponds to interval `r max_interval`.  
+*(A sidenote: the interval above is obtained using embedded R scirpt, not hard-coded).*
 
 
 ## Imputing missing values
 
+There are `r sum(is.na(data$steps))` NA values for steps in the dataset.    
+  The strategy to get rid of these NA values in the 'steps' column is by replacing them with the daily average steps for the same intervals across the entire dataset.  
+*(A sidenote: the count above is obtained using embedded R scirpt, not hard-coded).*
 
+
+```{r}
+obs_per_day <- nrow(mean_steps_by_time)
+new_data <- data
+na_rows <- which(is.na(new_data$steps))
+for(i in 1:length(na_rows)) {
+    r <- na_rows[i]
+    mean_index <- r%%obs_per_day
+    if (mean_index == 0) {
+        mean_index = obs_per_day
+    }
+    new_data[r,]$steps <- mean_steps_by_time[mean_index,]$steps
+}
+```
+
+Now, we'll plot the histogram of sum of steps of the modified data and let us compare it with the original one.
+
+```{r}
+# Let us plot the original data one more time for comparison.
+plot(daily_sum$date, daily_sum$steps, type="h",
+     main="Original - Total steps by day (Histogram)",
+     xlab="Date", ylab="Count", col="blue", lwd=5)
+# Now, let us plot the modified data.
+daily_sum <- aggregate(new_data$steps, list(new_data$date), FUN=sum)
+daily_sum <- setNames(daily_sum, c(names(new_data[2]),names(new_data[1])))
+plot(daily_sum$date, daily_sum$steps, type="h",
+     main="Modified - Total steps by day (Histogram)",
+     xlab="Date", ylab="Count", col="blue", lwd=5)
+```
+
+As you can see from these two plots, overall there is no major noticable change.   However, the biggest change in aggregate steps is for the days where there were all NA values before.
+
+Mean of the total number of steps taken per day
+
+```{r}
+setNames(aggregate(new_data$steps, list(new_data$date),
+                   FUN=mean, na.action=na.omit),
+         c(names(new_data[2]),"meanDailySteps"))
+```
+
+Observation: There are some changes to the mean data after the NA values are filled.   Still, overall the change is not substantial. However, the biggest change is for the days where we had all NA values before. 
+
+
+Median of the total number of steps taken per day
+
+```{r}
+setNames(aggregate(new_data$steps, list(new_data$date), FUN=median, na.rm=TRUE),
+         c(names(new_data[2]),"medianDailySteps"))
+```
+
+Observation: The median remains at 0 as before for most of the days.  However, for the days where we had all NA values before, the new dataset has median values of that is not 0 or NA.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+Let us split the transformed data into weekday and weekend data and plot the average steps for each to answer this question.
+
+```{r}
+# split the data into two sets
+suppressMessages(library(lubridate))
+suppressMessages(library(lattice))
+suppressMessages(library(plyr))
+
+wdays <- wday(new_data$date)
+# Add a day indicator column
+trans_data <- transform(new_data, day = wdays)
+# Add Weekend/Weekday label column
+trans_data$wd_we <- ifelse(trans_data$day %in% c(1, 7), "Weekend", "Weekday")
+# Calculate the mean for weekends and weekdays steps using plyr package
+mean_steps <- ddply(trans_data, .(interval, wd_we), summarise, steps = mean(steps))
+# Plot it as specified in the specfification
+xyplot(steps ~ interval | wd_we, data = mean_steps, layout = c(1, 2), type = "l",
+       xlab="Interval", ylab="Number of steps")
+```
+
+Based on the above two plots, we can see that irrespective of whether the day is a weekend or weekday, the activity between intervals 0 to 530 and 2100 to 2355 are pretty much the same. This corresponds to the time between 9:00 pm and 5:30 am, when the subject is likely sleeping/resting.   On weekdays, there is a lot more activity during 800 and 900 compared to the weekends. Whereas on weekends, there are spikes in activities at various intervals between 1000 and 1600, that are higher compared to the same period on weekdays.    
+
+
